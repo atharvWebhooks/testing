@@ -1,0 +1,14 @@
+inputSet:
+  name: Build_atharvWebhooks_testing_1702372418099-pr-trigger-input-set
+  identifier: Build_atharvWebhooks_testing_1702372418099prtriggerinputset
+  orgIdentifier: default
+  projectIdentifier: default_project
+  pipeline:
+    identifier: Build_atharvWebhooks_testing_1702372418099
+    properties:
+      ci:
+        codebase:
+          build:
+            type: PR
+            spec:
+              number: <+trigger.prNumber>
