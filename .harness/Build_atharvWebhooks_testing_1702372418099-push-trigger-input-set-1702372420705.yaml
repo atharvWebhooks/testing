@@ -1,0 +1,14 @@
+inputSet:
+  name: Build_atharvWebhooks_testing_1702372418099-push-trigger-input-set
+  identifier: Build_atharvWebhooks_testing_1702372418099pushtriggerinputset
+  orgIdentifier: default
+  projectIdentifier: default_project
+  pipeline:
+    identifier: Build_atharvWebhooks_testing_1702372418099
+    properties:
+      ci:
+        codebase:
+          build:
+            type: branch
+            spec:
+              branch: <+trigger.branch>
