@@ -1,0 +1,78 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: tag-ozone-api-server-images
+  namespace: ozone
+spec:
+  params:
+    - description: |
+        Name of registry
+      name: REGISTRY_NAME
+      type: string
+    - description: |
+        Registry user
+      name: REGISTRY_USER
+      type: string
+    - description: |
+        Registry password
+      name: REGISTRY_PASSWORD
+      type: string
+    - description: |
+        Registry password
+      name: IMAGE_TAG
+      type: string
+    - description: |
+        Registry password
+      name: IMAGE_TAG_NEW
+      type: string
+  tasks:
+    - name: tag-images
+      params:
+        - name: REGISTRY_NAME
+          value: $(params.REGISTRY_NAME)
+        - name: REGISTRY_USER
+          value: $(params.REGISTRY_USER)
+        - name: REGISTRY_PASSWORD
+          value: $(params.REGISTRY_PASSWORD)
+        - name: IMAGE_TAG
+          value: $(params.IMAGE_TAG)
+        - name: IMAGE_TAG_NEW
+          value: $(params.IMAGE_TAG_NEW)
+      taskSpec:
+        params:
+          - description: |
+              Name of registry
+            name: REGISTRY_NAME
+            type: string
+          - description: |
+              Registry user
+            name: REGISTRY_USER
+            type: string
+          - description: |
+              Registry password
+            name: REGISTRY_PASSWORD
+            type: string
+          - description: |
+              Registry password
+            name: IMAGE_TAG
+            type: string
+          - description: |
+              Registry password
+            name: IMAGE_TAG_NEW
+            type: string
+        steps:
+          - image: gcr.io/ozoneprod/ozone-build:v1.0.7
+            name: tag-images
+            script: |
+              sudo buildah --tls-verify=false --storage-driver=vfs login --username $REGISTRY_USER --password "$REGISTRY_PASSWORD" $REGISTRY_NAME
+              images=""
+              images="$images asia.gcr.io/ozoneprod/app-be-master"
+              for i in ${images}
+              do
+                sudo buildah --tls-verify=false --storage-driver=vfs pull $i:$IMAGE_TAG
+                sudo buildah --storage-driver=vfs tag $i:$IMAGE_TAG $i:$IMAGE_TAG_NEW
+                sudo buildah --tls-verify=false --storage-driver=vfs push $i:$IMAGE_TAG_NEW
+              done
+            securityContext:
+              privileged: true
+              runAsUser: 0
