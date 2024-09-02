@@ -1,0 +1,206 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: my-first-build-and-push
+  namespace: ozone
+spec:
+  params:
+  - description: |
+      Name of registry
+    name: REGISTRY_NAME
+    type: string
+  - description: |
+      Registry user
+    name: REGISTRY_USER
+    type: string
+  - description: |
+      Registry password
+    name: REGISTRY_PASSWORD
+    type: string
+  - description: |
+      Repository directory
+    name: PROJECT_DIR
+    type: string
+  - description: |
+      Repository user
+    name: REPO_USER
+    type: string
+  - description: |
+      Repository password
+    name: REPO_PASSWORD
+    type: string
+  - description: |
+      Repository url
+    name: REPO_URL
+    type: string
+  - description: |
+      Repo branch
+    name: REPO_BRANCH
+    type: string
+  - description: |
+      docker git param
+    name: DOCKER_NETRC
+    type: string
+  results:
+  - description: The image tag of the build
+    name: IMAGE_TAG
+    value: $(tasks.in2tive-image-build-task-v1.results.IMAGE_TAG)
+  tasks:
+  - name: in2tive-image-build-task-v1
+    params:
+    - name: REGISTRY_NAME
+      value: $(params.REGISTRY_NAME)
+    - name: REGISTRY_USER
+      value: $(params.REGISTRY_USER)
+    - name: REGISTRY_PASSWORD
+      value: $(params.REGISTRY_PASSWORD)
+    - name: PROJECT_DIR
+      value: $(params.PROJECT_DIR)
+    - name: DOCKER_NETRC
+      value: $(params.DOCKER_NETRC)
+    - name: REPO_USER
+      value: $(params.REPO_USER)
+    - name: REPO_PASSWORD
+      value: $(params.REPO_PASSWORD)
+    - name: REPO_URL
+      value: $(params.REPO_URL)
+    - name: REPO_BRANCH
+      value: $(params.REPO_BRANCH)
+    taskSpec:
+      params:
+      - description: |
+          Name of registry
+        name: REGISTRY_NAME
+        type: string
+      - description: |
+          Registry user
+        name: REGISTRY_USER
+        type: string
+      - description: |
+          Registry password
+        name: REGISTRY_PASSWORD
+        type: string
+      - description: |
+          Repository directory
+        name: PROJECT_DIR
+        type: string
+      - description: |
+          Repository user
+        name: REPO_USER
+        type: string
+      - description: |
+          Repository password
+        name: REPO_PASSWORD
+        type: string
+      - description: |
+          Repository url
+        name: REPO_URL
+        type: string
+      - description: |
+          Repo branch
+        name: REPO_BRANCH
+        type: string
+      - description: |
+          docker git param
+        name: DOCKER_NETRC
+        type: string
+      results:
+      - description: The image tag of the build
+        name: IMAGE_TAG
+      steps:
+      - image: gcr.io/ozoneprod/alpine/git:latest
+        name: git-clone
+        resources:
+          limits:
+            cpu: 200m
+            memory: 200Mi
+          requests:
+            cpu: 200m
+            memory: 200Mi
+        script: |
+          echo "cleaning up and cloning repo..."
+          rm -rf $(workspaces.gitpull.path)/$PROJECT_DIR
+          mkdir -pv $(workspaces.gitpull.path)
+          git clone -b $REPO_BRANCH --recursive https://"$REPO_USER":"$REPO_PASSWORD"@$REPO_URL $(workspaces.gitpull.path)/$PROJECT_DIR
+          echo "done cleaning up and cloning repo..."
+      - image: minio/mc
+        name: uncache
+        resources:
+          limits:
+            cpu: 200m
+            ephemeral-storage: 6Gi
+          requests:
+            cpu: 200m
+            ephemeral-storage: 5Gi
+        script: |
+          mc config host add c3 http://172.20.123.194:9000 ISZmA34FhN7dmYU7 GX0WdlizLRw0mMkFOcUFLjE3Ock6wALa
+          file=$(sha1sum $(workspaces.gitpull.path)/$PROJECT_DIR/go.sum | cut -f1 -d' ').tar.gz
+          mkdir -p $(workspaces.gitpull.path)/pkg/mod/cache
+          echo "checking if cache exists"
+          if mc cp c3/ozone-api-server-cache/$file go-mod.tar.gz; then
+            tar -xzf go-mod.tar.gz -C $(workspaces.gitpull.path)/pkg/mod/cache
+            ls $(workspaces.gitpull.path)/pkg/mod/cache && rm go-mod.tar.gz
+          else
+            echo 'checking other files'
+            file=$(mc find c3/ozone-api-server-cache | sort -n | tail -1)
+            if [ -n '$file' ];then
+              if mc cp $file go-mod.tar.gz; then
+                echo 'found file ${file}'
+                tar -xzf go-mod.tar.gz -C $(workspaces.gitpull.path)/pkg/mod/cache
+              fi
+            fi
+          fi
+      - image: gcr.io/ozoneprod/ozone-build:v1.0.7
+        name: make-build
+        resources:
+          limits:
+            cpu: 6000m
+            memory: 6000Mi
+          requests:
+            cpu: 4000m
+            memory: 4000Mi
+        script: |
+          echo "machine github.com login ${REPO_USER} password ${REPO_PASSWORD}" > $HOME/.netrc
+          cd $(workspaces.gitpull.path)/$PROJECT_DIR
+          # tag=`git describe --tags --abbrev=0`
+          tag=`make image-tag`
+          #git checkout -b $tag $tag
+          echo "make clean"
+          make clean
+          go version
+          go env -w GOPRIVATE=github.com/OzoneCloud
+          #echo "make coverage"
+          #make coverage
+
+          echo "building app-be-master"
+          make buildah-build PROJECT_NAME='app-be-master'
+          export IMAGE_TAG=$(./tools/image-tag)
+          echo -n $IMAGE_TAG | tee $(results.IMAGE_TAG.path)
+        securityContext:
+          privileged: true
+          runAsUser: 0
+      - image: minio/mc
+        name: cache
+        resources:
+          limits:
+            cpu: 200m
+            ephemeral-storage: 6Gi
+            memory: 4Gi
+          requests:
+            cpu: 200m
+            ephemeral-storage: 5Gi
+            memory: 4Gi
+        script: "mc config host add c3 http://172.20.123.194:9000 ISZmA34FhN7dmYU7
+          GX0WdlizLRw0mMkFOcUFLjE3Ock6wALa\nfile=$(sha1sum $(workspaces.gitpull.path)/$PROJECT_DIR/go.sum
+          | cut -f1 -d' ').tar.gz\nif mc stat c3/ozone-api-server-cache/$file; then\n
+          \ echo \"cache already exists\"\nelse\n  cd $(workspaces.gitpull.path)/pkg/mod/cache\n
+          \ tar -czf go-mod.tar.gz * \n  mc cp go-mod.tar.gz c3/ozone-api-server-cache/$file\nfi\n"
+      workspaces:
+      - description: Where git pulls
+        mountPath: /go
+        name: gitpull
+    workspaces:
+    - name: gitpull
+      workspace: gitpull
+  workspaces:
+  - name: gitpull
